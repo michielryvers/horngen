@@ -3,6 +3,10 @@ let oc = null;
 let currentShape = null;
 let scene, camera, renderer, controls;
 
+// Constants for OpenCascade library loading
+const MAX_OPENCASCADE_LOAD_RETRIES = 50;
+const OPENCASCADE_RETRY_INTERVAL_MS = 200;
+
 // Initialize the application
 async function init() {
     const loadingElement = document.getElementById('loading');
@@ -14,14 +18,13 @@ async function init() {
             loadingElement.textContent = 'Loading OpenCascade library...';
             
             // Wait for the library to load (max 10 seconds)
-            const maxRetries = 50;
-            for (let i = 0; i < maxRetries; i++) {
-                await new Promise(resolve => setTimeout(resolve, 200));
+            for (let i = 0; i < MAX_OPENCASCADE_LOAD_RETRIES; i++) {
+                await new Promise(resolve => setTimeout(resolve, OPENCASCADE_RETRY_INTERVAL_MS));
                 if (typeof opencascadeWasm !== 'undefined') {
-                    console.log(`OpenCascade library loaded after ${(i + 1) * 200}ms`);
+                    console.log(`OpenCascade library loaded after ${(i + 1) * OPENCASCADE_RETRY_INTERVAL_MS}ms`);
                     break;
                 }
-                if (i === maxRetries - 1) {
+                if (i === MAX_OPENCASCADE_LOAD_RETRIES - 1) {
                     throw new Error('OpenCascade library did not load in time');
                 }
             }
