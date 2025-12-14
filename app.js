@@ -3,11 +3,36 @@ let oc = null;
 let currentShape = null;
 let scene, camera, renderer, controls;
 
+// Constants for OpenCascade library loading
+const MAX_OPENCASCADE_LOAD_RETRIES = 50;
+const OPENCASCADE_RETRY_INTERVAL_MS = 200;
+
 // Initialize the application
 async function init() {
+    const loadingElement = document.getElementById('loading');
     try {
-        // Initialize OpenCascade
+        // Wait for opencascadeWasm to be available
         // opencascadeWasm() is provided by the opencascade.wasm.js library loaded via CDN
+        if (typeof opencascadeWasm === 'undefined') {
+            console.log('Waiting for OpenCascade library to load...');
+            loadingElement.textContent = 'Loading OpenCascade library...';
+            
+            // Wait for the library to load (max 10 seconds)
+            for (let i = 0; i < MAX_OPENCASCADE_LOAD_RETRIES; i++) {
+                await new Promise(resolve => setTimeout(resolve, OPENCASCADE_RETRY_INTERVAL_MS));
+                if (typeof opencascadeWasm !== 'undefined') {
+                    console.log(`OpenCascade library loaded after ${(i + 1) * OPENCASCADE_RETRY_INTERVAL_MS}ms`);
+                    break;
+                }
+                if (i === MAX_OPENCASCADE_LOAD_RETRIES - 1) {
+                    throw new Error('OpenCascade library did not load in time');
+                }
+            }
+        }
+        
+        loadingElement.textContent = 'Initializing OpenCascade...';
+        
+        // Initialize OpenCascade
         const opencascade = await opencascadeWasm();
         oc = opencascade;
         console.log('OpenCascade initialized successfully');
@@ -19,13 +44,13 @@ async function init() {
         setupEventListeners();
         
         // Hide loading message
-        document.getElementById('loading').style.display = 'none';
+        loadingElement.style.display = 'none';
         
         // Generate initial horn
         generateHorn();
     } catch (error) {
         console.error('Error initializing:', error);
-        document.getElementById('loading').textContent = 'Error loading OpenCascade. Please refresh the page.';
+        loadingElement.textContent = 'Error loading OpenCascade. Please refresh the page.';
     }
 }
 
