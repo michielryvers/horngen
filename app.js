@@ -186,11 +186,6 @@ function calculateHornProfile(type, throatRadius, mouthRadius, length, segments)
 
 // Generate horn geometry
 function generateHorn() {
-    if (!oc) {
-        console.error('OpenCascade not initialized');
-        return;
-    }
-    
     try {
         // Get parameters
         const hornType = document.getElementById('hornType').value;
@@ -206,19 +201,28 @@ function generateHorn() {
         // Calculate horn profile
         const profilePoints = calculateHornProfile(hornType, throatRadius, mouthRadius, hornLength, segments);
         
-        // Create horn shape using OpenCascade
-        const shape = createHornShape(profilePoints);
+        // Update info panel
+        updateInfoPanel(hornType, throatRadius, mouthRadius, hornLength, targetFrequency);
         
-        if (shape) {
-            currentShape = shape;
+        // Try to use OpenCascade if available, otherwise use Three.js fallback
+        if (oc) {
+            // Create horn shape using OpenCascade
+            const shape = createHornShape(profilePoints);
             
-            // Update info panel
-            updateInfoPanel(hornType, throatRadius, mouthRadius, hornLength, targetFrequency);
-            
-            // Render the shape
-            renderShape(shape);
-            
-            // Enable download button
+            if (shape) {
+                currentShape = shape;
+                renderShape(shape);
+                document.getElementById('downloadBtn').disabled = false;
+            } else {
+                // Fallback to Three.js rendering
+                console.warn('OpenCascade shape creation failed, using Three.js fallback');
+                renderHornWithThreeJS(profilePoints);
+                document.getElementById('downloadBtn').disabled = false;
+            }
+        } else {
+            // Use Three.js fallback
+            console.warn('OpenCascade not available, using Three.js fallback');
+            renderHornWithThreeJS(profilePoints);
             document.getElementById('downloadBtn').disabled = false;
         }
     } catch (error) {
@@ -230,21 +234,8 @@ function generateHorn() {
 // Create horn shape using OpenCascade
 function createHornShape(profilePoints) {
     try {
-        // Create points and build a spline through them
-        const points = new oc.TColgp_Array1OfPnt_2(1, profilePoints.length);
-        
-        for (let i = 0; i < profilePoints.length; i++) {
-            const pt = profilePoints[i];
-            const point = new oc.gp_Pnt_3(pt.x, 0, 0);
-            points.SetValue(i + 1, point);
-        }
-        
-        // Create BSpline curve
-        const spline = new oc.GeomAPI_PointsToBSpline_2(points, 3, 8, oc.GeomAbs_Shape.GeomAbs_C2, 1.0e-3);
-        const curve = spline.Curve();
-        
-        // Create edges for the profile
-        const edges = new oc.TopTools_ListOfShape_1();
+        // Create edges for the profile (horn surface)
+        const profileEdges = [];
         
         for (let i = 0; i < profilePoints.length - 1; i++) {
             const pt1 = profilePoints[i];
@@ -254,43 +245,78 @@ function createHornShape(profilePoints) {
             const p2 = new oc.gp_Pnt_3(pt2.x, pt2.r, 0);
             
             const edge = new oc.BRepBuilderAPI_MakeEdge_3(p1, p2).Edge();
-            edges.Append_1(edge);
+            profileEdges.push(edge);
         }
         
-        // Close the profile at throat
+        // Create edges to close the profile
         const firstPt = profilePoints[0];
-        const p1 = new oc.gp_Pnt_3(firstPt.x, firstPt.r, 0);
-        const p2 = new oc.gp_Pnt_3(firstPt.x, 0, 0);
-        const closingEdge1 = new oc.BRepBuilderAPI_MakeEdge_3(p1, p2).Edge();
-        edges.Append_1(closingEdge1);
-        
-        // Close at axis
         const lastPt = profilePoints[profilePoints.length - 1];
-        const p3 = new oc.gp_Pnt_3(lastPt.x, 0, 0);
-        const p4 = new oc.gp_Pnt_3(lastPt.x, lastPt.r, 0);
-        const closingEdge2 = new oc.BRepBuilderAPI_MakeEdge_3(p3, p4).Edge();
-        edges.Append_1(closingEdge2);
+        
+        // Edge from throat opening to axis
+        const throatEdge = new oc.BRepBuilderAPI_MakeEdge_3(
+            new oc.gp_Pnt_3(firstPt.x, firstPt.r, 0),
+            new oc.gp_Pnt_3(firstPt.x, 0, 0)
+        ).Edge();
+        
+        // Edge along axis
+        const axisEdge = new oc.BRepBuilderAPI_MakeEdge_3(
+            new oc.gp_Pnt_3(firstPt.x, 0, 0),
+            new oc.gp_Pnt_3(lastPt.x, 0, 0)
+        ).Edge();
+        
+        // Edge from axis to mouth opening
+        const mouthEdge = new oc.BRepBuilderAPI_MakeEdge_3(
+            new oc.gp_Pnt_3(lastPt.x, 0, 0),
+            new oc.gp_Pnt_3(lastPt.x, lastPt.r, 0)
+        ).Edge();
         
         // Build wire from edges
         const wireMaker = new oc.BRepBuilderAPI_MakeWire_1();
-        const edgeIterator = edges.Iterator_1();
-        while (edgeIterator.More()) {
-            wireMaker.Add_2(oc.TopoDS.Edge_1(edgeIterator.Value()));
-            edgeIterator.Next();
+        
+        // Add profile edges
+        for (const edge of profileEdges) {
+            wireMaker.Add_1(edge);
         }
+        
+        // Add closing edges
+        wireMaker.Add_1(mouthEdge);
+        wireMaker.Add_1(axisEdge);
+        wireMaker.Add_1(throatEdge);
+        
+        if (!wireMaker.IsDone()) {
+            console.error('Failed to create wire');
+            return null;
+        }
+        
         const wire = wireMaker.Wire();
         
         // Create face from wire
-        const face = new oc.BRepBuilderAPI_MakeFace_15(wire, false).Face();
+        const faceMaker = new oc.BRepBuilderAPI_MakeFace_15(wire, false);
+        if (!faceMaker.IsDone()) {
+            console.error('Failed to create face');
+            return null;
+        }
+        const face = faceMaker.Face();
         
         // Revolve the profile around X-axis to create the horn
-        const axis = new oc.gp_Ax1_2(new oc.gp_Pnt_3(0, 0, 0), new oc.gp_Dir_4(1, 0, 0));
+        const axis = new oc.gp_Ax1_2(
+            new oc.gp_Pnt_3(0, 0, 0),
+            new oc.gp_Dir_4(1, 0, 0)
+        );
         const revolve = new oc.BRepPrimAPI_MakeRevol_1(face, axis, 2 * Math.PI, false);
+        
+        if (!revolve.IsDone()) {
+            console.error('Failed to revolve face');
+            return null;
+        }
+        
         const shape = revolve.Shape();
         
+        console.log('Horn shape created successfully');
         return shape;
     } catch (error) {
         console.error('Error creating horn shape:', error);
+        console.error('Error details:', error.message, error.stack);
         return null;
     }
 }
@@ -392,6 +418,94 @@ function renderShape(shape) {
     }
 }
 
+// Fallback: Render horn using Three.js directly (without OpenCascade)
+function renderHornWithThreeJS(profilePoints) {
+    // Remove previous mesh
+    const existingMesh = scene.getObjectByName('horn');
+    if (existingMesh) {
+        scene.remove(existingMesh);
+    }
+    
+    try {
+        const vertices = [];
+        const indices = [];
+        const radialSegments = 64; // Number of segments around the horn
+        
+        // Generate vertices for each profile point
+        for (let i = 0; i < profilePoints.length; i++) {
+            const point = profilePoints[i];
+            
+            for (let j = 0; j <= radialSegments; j++) {
+                const theta = (j / radialSegments) * Math.PI * 2;
+                const x = point.x;
+                const y = Math.cos(theta) * point.r;
+                const z = Math.sin(theta) * point.r;
+                
+                vertices.push(x, y, z);
+            }
+        }
+        
+        // Generate indices for the triangles
+        for (let i = 0; i < profilePoints.length - 1; i++) {
+            for (let j = 0; j < radialSegments; j++) {
+                const a = i * (radialSegments + 1) + j;
+                const b = a + radialSegments + 1;
+                const c = a + 1;
+                const d = b + 1;
+                
+                // Two triangles per quad
+                indices.push(a, b, c);
+                indices.push(c, b, d);
+            }
+        }
+        
+        // Create geometry
+        const geometry = new THREE.BufferGeometry();
+        geometry.setAttribute('position', new THREE.Float32BufferAttribute(vertices, 3));
+        geometry.setIndex(indices);
+        geometry.computeVertexNormals();
+        
+        // Create material
+        const material = new THREE.MeshPhongMaterial({
+            color: 0x667eea,
+            specular: 0x111111,
+            shininess: 30,
+            side: THREE.DoubleSide
+        });
+        
+        // Create mesh
+        const mesh = new THREE.Mesh(geometry, material);
+        mesh.name = 'horn';
+        scene.add(mesh);
+        
+        // Add wireframe
+        const wireframeGeometry = new THREE.EdgesGeometry(geometry);
+        const wireframeMaterial = new THREE.LineBasicMaterial({ 
+            color: 0x000000, 
+            linewidth: 1, 
+            opacity: 0.1, 
+            transparent: true 
+        });
+        const wireframe = new THREE.LineSegments(wireframeGeometry, wireframeMaterial);
+        mesh.add(wireframe);
+        
+        // Store geometry for STL export
+        mesh.userData.geometry = geometry;
+        
+        // Center camera on the horn
+        const boundingBox = new THREE.Box3().setFromObject(mesh);
+        const center = boundingBox.getCenter(new THREE.Vector3());
+        const size = boundingBox.getSize(new THREE.Vector3());
+        
+        controls.target.copy(center);
+        camera.position.set(center.x + size.x * 1.5, center.y + size.y * 1.5, center.z + size.z * 1.5);
+        
+        console.log('Horn rendered using Three.js fallback');
+    } catch (error) {
+        console.error('Error rendering horn with Three.js:', error);
+    }
+}
+
 // Update info panel
 function updateInfoPanel(hornType, throatRadius, mouthRadius, length, targetFreq) {
     const speedOfSound = 343000; // mm/s
@@ -417,11 +531,22 @@ function updateInfoPanel(hornType, throatRadius, mouthRadius, length, targetFreq
 
 // Download STL
 function downloadSTL() {
-    if (!currentShape || !oc) {
-        alert('Please generate a horn first');
-        return;
+    try {
+        // Try OpenCascade export first
+        if (currentShape && oc) {
+            downloadSTLOpenCascade();
+        } else {
+            // Fallback to Three.js export
+            downloadSTLThreeJS();
+        }
+    } catch (error) {
+        console.error('Error downloading STL:', error);
+        alert('Error exporting STL. Please try again.');
     }
-    
+}
+
+// Download STL using OpenCascade
+function downloadSTLOpenCascade() {
     try {
         // Write STL
         const stlWriter = new oc.StlAPI_Writer_1();
@@ -447,10 +572,81 @@ function downloadSTL() {
         // Clean up
         oc.FS.unlink('/' + filename);
         
-        console.log('STL downloaded successfully');
+        console.log('STL downloaded successfully (OpenCascade)');
     } catch (error) {
-        console.error('Error downloading STL:', error);
-        alert('Error exporting STL. Please try again.');
+        console.error('Error with OpenCascade STL export:', error);
+        throw error;
+    }
+}
+
+// Download STL using Three.js geometry
+function downloadSTLThreeJS() {
+    const hornMesh = scene.getObjectByName('horn');
+    
+    if (!hornMesh || !hornMesh.geometry) {
+        alert('Please generate a horn first');
+        return;
+    }
+    
+    try {
+        const geometry = hornMesh.geometry;
+        
+        // Generate STL file content
+        let stlString = 'solid horn\n';
+        
+        const vertices = geometry.attributes.position.array;
+        const indices = geometry.index ? geometry.index.array : null;
+        const normals = geometry.attributes.normal.array;
+        
+        if (indices) {
+            // Indexed geometry
+            for (let i = 0; i < indices.length; i += 3) {
+                const i1 = indices[i] * 3;
+                const i2 = indices[i + 1] * 3;
+                const i3 = indices[i + 2] * 3;
+                
+                const n = i1; // Use first vertex normal for the facet
+                
+                stlString += `  facet normal ${normals[n]} ${normals[n + 1]} ${normals[n + 2]}\n`;
+                stlString += '    outer loop\n';
+                stlString += `      vertex ${vertices[i1]} ${vertices[i1 + 1]} ${vertices[i1 + 2]}\n`;
+                stlString += `      vertex ${vertices[i2]} ${vertices[i2 + 1]} ${vertices[i2 + 2]}\n`;
+                stlString += `      vertex ${vertices[i3]} ${vertices[i3 + 1]} ${vertices[i3 + 2]}\n`;
+                stlString += '    endloop\n';
+                stlString += '  endfacet\n';
+            }
+        } else {
+            // Non-indexed geometry
+            for (let i = 0; i < vertices.length; i += 9) {
+                const n = i;
+                
+                stlString += `  facet normal ${normals[n]} ${normals[n + 1]} ${normals[n + 2]}\n`;
+                stlString += '    outer loop\n';
+                stlString += `      vertex ${vertices[i]} ${vertices[i + 1]} ${vertices[i + 2]}\n`;
+                stlString += `      vertex ${vertices[i + 3]} ${vertices[i + 4]} ${vertices[i + 5]}\n`;
+                stlString += `      vertex ${vertices[i + 6]} ${vertices[i + 7]} ${vertices[i + 8]}\n`;
+                stlString += '    endloop\n';
+                stlString += '  endfacet\n';
+            }
+        }
+        
+        stlString += 'endsolid horn\n';
+        
+        // Create blob and download
+        const blob = new Blob([stlString], { type: 'text/plain' });
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = 'horn.stl';
+        document.body.appendChild(a);
+        a.click();
+        document.body.removeChild(a);
+        URL.revokeObjectURL(url);
+        
+        console.log('STL downloaded successfully (Three.js)');
+    } catch (error) {
+        console.error('Error with Three.js STL export:', error);
+        throw error;
     }
 }
 
