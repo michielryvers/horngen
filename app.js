@@ -7,6 +7,7 @@ let scene, camera, renderer, controls;
 async function init() {
     try {
         // Initialize OpenCascade
+        // opencascadeWasm() is provided by the opencascade.wasm.js library loaded via CDN
         const opencascade = await opencascadeWasm();
         oc = opencascade;
         console.log('OpenCascade initialized successfully');
@@ -150,34 +151,35 @@ function calculateHornProfile(type, throatRadius, mouthRadius, length, segments)
     
     if (type === 'exponential') {
         // Exponential horn: r(x) = r0 * exp(mx)
-        const m = Math.log(mouthRadius / throatRadius) / length;
+        // where m is the flare constant
+        const flareConstant = Math.log(mouthRadius / throatRadius) / length;
         
         for (let i = 0; i <= segments; i++) {
             const x = (i / segments) * length;
-            const r = throatRadius * Math.exp(m * x);
+            const r = throatRadius * Math.exp(flareConstant * x);
             points.push({ x, r });
         }
     } else if (type === 'tractrix') {
-        // Tractrix horn
-        const m = 0.00001; // Small value to avoid singularity at throat
-        const rm = mouthRadius;
-        const rt = throatRadius;
-        
-        // Calculate tractrix parameter
-        const a = length / (Math.acosh(rm / rt) - Math.sqrt((rm / rt) ** 2 - 1) + Math.sqrt((rt / rm) ** 2 - 1) + 1);
+        // Tractrix horn - a compromise between exponential and conical
+        // Uses a modified exponential with smoothing factor
+        const expansionRatio = mouthRadius / throatRadius;
         
         for (let i = 0; i <= segments; i++) {
             const x = (i / segments) * length;
+            const t = x / length; // Normalized position (0 to 1)
             
-            // Tractrix equation (approximation for practical horn design)
-            const t = x / length;
-            const r = rt * Math.exp((t * Math.log(rm / rt)));
+            // Base exponential expansion
+            const baseR = throatRadius * Math.exp(t * Math.log(expansionRatio));
             
-            // Add tractrix curve adjustment
-            const tractrixFactor = Math.sqrt(1 + (x / (length * 0.3)) ** 2);
-            const adjustedR = r / Math.pow(tractrixFactor, 0.3);
+            // Apply tractrix-like smoothing to reduce flare at the mouth
+            // This creates a more gradual transition at the throat
+            const smoothingFactor = 0.3;
+            const tractrixModifier = Math.sqrt(1 + (x / (length * smoothingFactor)) ** 2);
+            const adjustedR = baseR / Math.pow(tractrixModifier, smoothingFactor);
             
-            points.push({ x, r: Math.max(rt, Math.min(rm, adjustedR)) });
+            // Clamp to valid range
+            const r = Math.max(throatRadius, Math.min(mouthRadius, adjustedR));
+            points.push({ x, r });
         }
     }
     
@@ -512,20 +514,20 @@ function updateInfoPanel(hornType, throatRadius, mouthRadius, length, targetFreq
     const cutoffFreq = speedOfSound / (4 * length);
     
     const expansionRatio = mouthRadius / throatRadius;
-    const m = Math.log(expansionRatio) / length;
+    const flareConstant = Math.log(expansionRatio) / length;
     
-    // Calculate approximate volume (numerical integration)
+    // Calculate approximate volume (numerical integration using exponential approximation)
     let volume = 0;
     const steps = 100;
     for (let i = 0; i < steps; i++) {
         const x = (i / steps) * length;
-        const r = throatRadius * Math.exp(m * x);
+        const r = throatRadius * Math.exp(flareConstant * x);
         volume += Math.PI * r * r * (length / steps);
     }
     volume = volume / 1000; // Convert to cm³
     
     document.getElementById('cutoffFreq').textContent = cutoffFreq.toFixed(1);
-    document.getElementById('expansionRate').textContent = m.toFixed(6);
+    document.getElementById('expansionRate').textContent = flareConstant.toFixed(6);
     document.getElementById('volume').textContent = volume.toFixed(1);
 }
 
