@@ -6,8 +6,24 @@ let scene, camera, renderer, controls;
 // Initialize the application
 async function init() {
     try {
-        // Initialize OpenCascade
+        // Wait for opencascadeWasm to be available
         // opencascadeWasm() is provided by the opencascade.wasm.js library loaded via CDN
+        if (typeof opencascadeWasm === 'undefined') {
+            console.log('Waiting for OpenCascade library to load...');
+            // Wait for the library to load (max 10 seconds)
+            const maxRetries = 50;
+            for (let i = 0; i < maxRetries; i++) {
+                await new Promise(resolve => setTimeout(resolve, 200));
+                if (typeof opencascadeWasm !== 'undefined') {
+                    break;
+                }
+                if (i === maxRetries - 1) {
+                    throw new Error('OpenCascade library did not load in time');
+                }
+            }
+        }
+        
+        // Initialize OpenCascade
         const opencascade = await opencascadeWasm();
         oc = opencascade;
         console.log('OpenCascade initialized successfully');
