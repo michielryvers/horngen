@@ -17,16 +17,41 @@ A web-based speaker horn generator using OpenCascade.js for 3D modeling and visu
 
 ## Usage
 
-Visit the [live application](https://michielryvers.github.io/horngen/) or run locally:
+### Online
 
-1. Open `index.html` in a modern web browser
-2. Adjust the horn parameters in the control panel
-3. Click "Generate Horn" to create the 3D model
-4. Use mouse controls to interact with the preview:
+Visit the [live application](https://michielryvers.github.io/horngen/)
+
+### Local Development
+
+1. Clone the repository
+2. Install dependencies:
+   ```bash
+   npm install
+   ```
+3. Start the development server:
+   ```bash
+   npm run dev
+   ```
+4. Open http://localhost:5173 in a modern web browser
+
+### Building for Production
+
+To build the project for deployment:
+```bash
+npm run build
+```
+
+The built files will be in the `dist/` directory.
+
+### Using the Application
+
+1. Adjust the horn parameters in the control panel
+2. Click "Generate Horn" to create the 3D model
+3. Use mouse controls to interact with the preview:
    - Left-click and drag to rotate
    - Right-click and drag to pan
    - Scroll to zoom
-5. Click "Download STL" to export the model
+4. Click "Download STL" to export the model
 
 ## Horn Types
 
@@ -47,8 +72,9 @@ A tractrix horn follows a mathematically derived curve that provides constant ac
 ## Technical Details
 
 The application uses:
-- **OpenCascade.js**: For CAD-quality 3D geometry generation
-- **Three.js**: For real-time 3D visualization
+- **OpenCascade.js**: For CAD-quality 3D geometry generation (installed via npm)
+- **Three.js**: For real-time 3D visualization (installed via npm)
+- **Vite**: For bundling and development server
 - **GitHub Pages**: For static site hosting
 
 All calculations are performed in the browser, with no server-side processing required.
@@ -58,8 +84,14 @@ All calculations are performed in the browser, with no server-side processing re
 The project consists of:
 - `index.html`: Main application page
 - `styles.css`: Styling and layout
-- `app.js`: Application logic, horn calculations, and 3D rendering
+- `main.js`: Application logic, horn calculations, and 3D rendering
+- `package.json`: NPM dependencies and build scripts
+- `vite.config.js`: Vite bundler configuration
 - `.github/workflows/pages.yml`: GitHub Pages deployment configuration
+
+### Build System
+
+The project uses Vite as its build system. OpenCascade.js and Three.js are installed from npm and bundled together with the application code. The WASM files required by OpenCascade.js are copied to the public directory and served alongside the application.
 
 ## License
 
