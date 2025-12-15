@@ -6,7 +6,20 @@ export default defineConfig({
     outDir: 'dist',
     assetsDir: 'assets',
     target: 'esnext',
-    copyPublicDir: true
+    copyPublicDir: true,
+    rollupOptions: {
+      external: ['/opencascade.wasm.js', '/opencascade.wasm.wasm'],
+      output: {
+        // Don't hash the opencascade files
+        assetFileNames: (assetInfo) => {
+          if (assetInfo.name === 'opencascade.wasm.js' || assetInfo.name === 'opencascade.wasm.wasm') {
+            return '[name][extname]';
+          }
+          return 'assets/[name]-[hash][extname]';
+        }
+      }
+    }
   },
-  publicDir: 'public'
+  publicDir: 'public',
+  assetsInclude: ['**/*.wasm']
 });

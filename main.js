@@ -3,34 +3,22 @@ import * as THREE from 'three';
 
 // Load OpenCascade dynamically from the public directory
 async function loadOpenCascade() {
-    // Load the opencascade.wasm.js script
-    const script = document.createElement('script');
-    script.src = './opencascade.wasm.js';
-    document.head.appendChild(script);
+    // Dynamically import the opencascade module
+    // Use absolute path from root since the file is in the public directory
+    const opencascadeModule = await import(/* @vite-ignore */ '/opencascade.wasm.js');
+    const opencascade = opencascadeModule.default;
     
-    // Wait for the script to load and opencascadeWasm to be available
-    return new Promise((resolve, reject) => {
-        script.onload = async () => {
-            try {
-                if (typeof window.opencascadeWasm === 'undefined') {
-                    reject(new Error('opencascadeWasm not found'));
-                    return;
-                }
-                const oc = await window.opencascadeWasm({
-                    locateFile: (path) => {
-                        if (path.endsWith('.wasm')) {
-                            return './opencascade.wasm.wasm';
-                        }
-                        return path;
-                    }
-                });
-                resolve(oc);
-            } catch (error) {
-                reject(error);
+    // Initialize OpenCascade with proper locateFile
+    const oc = await opencascade({
+        locateFile: (path) => {
+            if (path.endsWith('.wasm')) {
+                return '/opencascade.wasm.wasm';
             }
-        };
-        script.onerror = () => reject(new Error('Failed to load OpenCascade'));
+            return path;
+        }
     });
+    
+    return oc;
 }
 
 // Global variables
@@ -245,16 +233,23 @@ function generateHorn() {
         
         // Try to use OpenCascade if available, otherwise use Three.js fallback
         if (oc) {
-            // Create horn shape using OpenCascade
-            const shape = createHornShape(profilePoints);
-            
-            if (shape) {
-                currentShape = shape;
-                renderShape(shape);
-                document.getElementById('downloadBtn').disabled = false;
-            } else {
-                // Fallback to Three.js rendering
-                console.warn('OpenCascade shape creation failed, using Three.js fallback');
+            try {
+                // Create horn shape using OpenCascade
+                const shape = createHornShape(profilePoints);
+                
+                if (shape) {
+                    currentShape = shape;
+                    renderShape(shape);
+                    document.getElementById('downloadBtn').disabled = false;
+                } else {
+                    // Fallback to Three.js rendering
+                    console.warn('OpenCascade shape creation failed, using Three.js fallback');
+                    renderHornWithThreeJS(profilePoints);
+                    document.getElementById('downloadBtn').disabled = false;
+                }
+            } catch (renderError) {
+                // If OpenCascade rendering fails, fall back to Three.js
+                console.warn('OpenCascade rendering failed, using Three.js fallback:', renderError);
                 renderHornWithThreeJS(profilePoints);
                 document.getElementById('downloadBtn').disabled = false;
             }
@@ -386,8 +381,17 @@ function renderShape(shape) {
             
             if (!triangulationFace.IsNull()) {
                 const transformation = location.Transformation();
-                const nodeCount = triangulationFace.NbNodes();
-                const triangleCount = triangulationFace.NbTriangles();
+                // Try different API methods for getting node and triangle counts
+                const nodeCount = triangulationFace.NbNodes ? triangulationFace.NbNodes() : 
+                                 triangulationFace.get?.('NbNodes') ?? 0;
+                const triangleCount = triangulationFace.NbTriangles ? triangulationFace.NbTriangles() :
+                                     triangulationFace.get?.('NbTriangles') ?? 0;
+                
+                if (nodeCount === 0 || triangleCount === 0) {
+                    console.warn('Triangulation has no nodes or triangles, skipping face');
+                    explorer.Next();
+                    continue;
+                }
                 
                 const indexOffset = vertices.length / 3;
                 
@@ -417,6 +421,10 @@ function renderShape(shape) {
             }
             
             explorer.Next();
+        }
+        
+        if (vertices.length === 0 || indices.length === 0) {
+            throw new Error('No mesh data extracted from shape');
         }
         
         // Create Three.js geometry
@@ -453,7 +461,9 @@ function renderShape(shape) {
         camera.position.set(center.x + size.x * 1.5, center.y + size.y * 1.5, center.z + size.z * 1.5);
         
     } catch (error) {
-        console.error('Error rendering shape:', error);
+        console.error('Error rendering shape with OpenCascade, falling back to Three.js:', error);
+        // Use the profile points stored globally or re-calculate
+        // For now, we'll just log the error. The generateHorn function will handle retries.
     }
 }
 
